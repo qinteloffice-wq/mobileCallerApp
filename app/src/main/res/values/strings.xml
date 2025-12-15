@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Caller</string>
+    <string name="accessibility_service_description">This service is used to automatically end phone calls after a set duration. It requires permission to view and interact with the screen to press the end call button in the dialer app.</string>
+</resources>
