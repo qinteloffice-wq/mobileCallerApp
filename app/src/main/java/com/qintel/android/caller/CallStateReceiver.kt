@@ -69,12 +69,21 @@ class CallStateReceiver : BroadcastReceiver() {
 
                         val pendingResult = goAsync()
                         CoroutineScope(Dispatchers.IO).launch {
-                            if (checkStoragePermission(context)) {
-                                uploadLatestRecording(context)
+                            try {
+                                if (checkStoragePermission(context)) {
+                                    uploadLatestRecording(context)
+                                } else {
+                                    Log.w("CallStateReceiver", "Storage permission denied. Work will time out in the service.")
+                                }
+                            } finally {
+                                // Always signal completion to the service to unlock the polling loop.
+                                val workCompleteIntent = Intent(CallWorkerService.ACTION_WORK_COMPLETE).apply {
+                                    setPackage(context.packageName)
+                                }
+                                context.sendBroadcast(workCompleteIntent)
+                                Log.d("CallStateReceiver", "Upload process finished. Sent broadcast to service.")
+                                pendingResult.finish()
                             }
-                            setWorkInProgress(context, false)
-                            Log.d("CallStateReceiver", "Work is complete. Polling will resume.")
-                            pendingResult.finish()
                         }
                     }
                 }
@@ -82,17 +91,6 @@ class CallStateReceiver : BroadcastReceiver() {
                     lastState = TelephonyManager.EXTRA_STATE_RINGING
                 }
             }
-        }
-    }
-
-    private fun setWorkInProgress(context: Context, inProgress: Boolean) {
-        val sharedPref = context.getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE) ?: return
-        with(sharedPref.edit()) {
-            putBoolean("isWorkInProgress", inProgress)
-            if (!inProgress) {
-                remove("workStartTime")
-            }
-            apply()
         }
     }
 
@@ -160,7 +158,7 @@ class CallStateReceiver : BroadcastReceiver() {
             return
         }
         
-        val maxRetries = 3
+        val maxRetries = 10
         for (attempt in 1..maxRetries) {
             val client = HttpClient(CIO)
             try {
@@ -185,7 +183,7 @@ class CallStateReceiver : BroadcastReceiver() {
                             if (deletedRows > 0) {
                                 Log.d("UploadFile", "Successfully deleted local recording via ContentResolver.")
                             } else {
-                                Log.e("UploadFile", "Failed to delete via ContentResolver (0 rows affected). Direct delete fallback not attempted as per new logic.")
+                                Log.e("UploadFile", "Failed to delete via ContentResolver (0 rows affected). File might not exist.")
                             }
                         } catch (e: SecurityException) {
                             Log.e("UploadFile", "SecurityException on deleting via ContentResolver.", e)

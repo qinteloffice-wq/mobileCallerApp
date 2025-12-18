@@ -36,8 +36,7 @@ class CallEndService : AccessibilityService() {
                     stopEndCallTimer()
                 }
                 ACTION_MUTE_CALL -> {
-                    Log.d(TAG, "Received mute call command. Logging view hierarchy before attempting action.")
-                    logViewHierarchy(rootInActiveWindow, 0)
+                    Log.d(TAG, "Received mute call command.")
                     findAndClickMuteButton(rootInActiveWindow)
                 }
             }
@@ -67,8 +66,7 @@ class CallEndService : AccessibilityService() {
         val durationMs = sharedPref.getLong("callDurationMs", 60_000L) // Default to 60 seconds
 
         endCallRunnable = Runnable {
-            Log.d(TAG, "Timer elapsed ($durationMs ms). Logging view hierarchy before attempting to end call.")
-            logViewHierarchy(rootInActiveWindow, 0)
+            Log.d(TAG, "Timer elapsed ($durationMs ms). Attempting to end call.")
             findAndClickEndCallButton(rootInActiveWindow)
         }
         handler.postDelayed(endCallRunnable!!, durationMs)
@@ -82,21 +80,13 @@ class CallEndService : AccessibilityService() {
         }
     }
 
-    private fun logViewHierarchy(nodeInfo: AccessibilityNodeInfo?, depth: Int) {
-        if (nodeInfo == null) return
-        val padding = "  ".repeat(depth)
-        Log.d(TAG, "$padding- Text: '${nodeInfo.text}', Desc: '${nodeInfo.contentDescription}', ID: '${nodeInfo.viewIdResourceName}', Clickable: ${nodeInfo.isClickable}")
-
-        for (i in 0 until nodeInfo.childCount) {
-            logViewHierarchy(nodeInfo.getChild(i), depth + 1)
-        }
-    }
-
     private fun findAndClickMuteButton(rootNode: AccessibilityNodeInfo?) {
         if (rootNode == null) {
             Log.e(TAG, "Cannot search for Mute button, root node is null.")
             return
         }
+        Log.d(TAG, "Attempting to find Mute button in window: ${rootNode.packageName}")
+        logViewHierarchy(rootNode, 0)
 
         val muteKeywords = listOf("Mute", "Unmute")
         for (keyword in muteKeywords) {
@@ -121,6 +111,8 @@ class CallEndService : AccessibilityService() {
             Log.e(TAG, "Cannot search for End Call button, root node is null.")
             return
         }
+        Log.d(TAG, "Attempting to find End Call button in window: ${rootNode.packageName}")
+        logViewHierarchy(rootNode, 0)
 
         val endCallDescriptions = listOf("End call", "Hang up", "End")
         for (desc in endCallDescriptions) {
@@ -138,6 +130,16 @@ class CallEndService : AccessibilityService() {
             }
         }
         Log.w(TAG, "End call button not found after checking all keywords.")
+    }
+    
+    private fun logViewHierarchy(nodeInfo: AccessibilityNodeInfo?, depth: Int) {
+        if (nodeInfo == null) return
+        val padding = "  ".repeat(depth)
+        Log.d(TAG, "$padding- Text: '${nodeInfo.text}', Desc: '${nodeInfo.contentDescription}', ID: '${nodeInfo.viewIdResourceName}', Clickable: ${nodeInfo.isClickable}")
+
+        for (i in 0 until nodeInfo.childCount) {
+            logViewHierarchy(nodeInfo.getChild(i), depth + 1)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}

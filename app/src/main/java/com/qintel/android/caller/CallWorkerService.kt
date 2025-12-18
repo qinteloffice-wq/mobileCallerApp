@@ -4,13 +4,15 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import io.ktor.client.*
+import io.ktor.client.* 
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.HttpTimeout
@@ -37,6 +39,19 @@ class CallWorkerService : Service() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
+    companion object {
+        const val ACTION_WORK_COMPLETE = "com.qintel.android.caller.ACTION_WORK_COMPLETE"
+    }
+
+    private val workCompleteReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_WORK_COMPLETE) {
+                Log.d(TAG, "Received work complete signal. Resuming polling.")
+                setWorkInProgress(false, null)
+            }
+        }
+    }
+
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json {
@@ -52,21 +67,43 @@ class CallWorkerService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        val filter = IntentFilter(ACTION_WORK_COMPLETE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(workCompleteReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(workCompleteReceiver, filter)
+        }
+        // Start polling loop only once when the service is first created.
+        startPolling()
+        Log.d(TAG, "Service created and polling initiated.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, createNotification("Polling for work..."))
-        startPolling()
-        Log.d(TAG, "Service started and polling initiated.")
+        Log.d(TAG, "Service onStartCommand executed.")
         return START_STICKY // Ensures service restarts if killed
     }
 
     private fun startPolling() {
         serviceScope.launch {
             while (isActive) {
-                if (!isWorkInProgress()) {
+                val sharedPref = getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE)
+                var isInProgress = sharedPref.getBoolean("isWorkInProgress", false)
+
+                if (isInProgress) {
+                    val workStartTime = sharedPref.getLong("workStartTime", 0L)
+                    val elapsedTime = System.currentTimeMillis() - workStartTime
+                    val threeMinutesInMillis = 3 * 60 * 1000
+
+                    if (elapsedTime > threeMinutesInMillis) {
+                        Log.w(TAG, "Work in progress flag is stale (> 3 minutes). Clearing it to allow new work on next poll.")
+                        setWorkInProgress(false, null)
+                        isInProgress = false // Update local variable to allow fetching work in this same cycle
+                    }
+                }
+                
+                if (!isInProgress) {
                     try {
-                        val sharedPref = getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE)
                         val sim1 = sharedPref.getString("simNumber1", "") ?: ""
                         val sim2 = sharedPref.getString("simNumber2", "") ?: ""
 
@@ -100,7 +137,7 @@ class CallWorkerService : Service() {
                         Log.e(TAG, "Error fetching work.", e)
                     }
                 } else {
-                    Log.d(TAG, "Work is in progress. Skipping poll.")
+                    Log.d(TAG, "Work is already in progress. Skipping poll.")
                     updateNotification("Work in progress...")
                 }
                 delay(5_000)
@@ -108,26 +145,6 @@ class CallWorkerService : Service() {
         }
     }
     
-    private fun isWorkInProgress(): Boolean {
-        val sharedPref = getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE)
-        val isInProgress = sharedPref.getBoolean("isWorkInProgress", false)
-        if (!isInProgress) {
-            return false
-        }
-
-        val workStartTime = sharedPref.getLong("workStartTime", 0L)
-        val elapsedTime = System.currentTimeMillis() - workStartTime
-        val threeMinutesInMillis = 3 * 60 * 1000
-
-        if (elapsedTime > threeMinutesInMillis) {
-            Log.w(TAG, "Work in progress flag is stale (> 3 minutes). Clearing it.")
-            setWorkInProgress(false, null) // Clear the stale work
-            return false
-        }
-
-        return true
-    }
-
     private fun setWorkInProgress(inProgress: Boolean, workItem: WorkItem?) {
         val sharedPref = getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE) ?: return
         with(sharedPref.edit()) {
@@ -138,7 +155,9 @@ class CallWorkerService : Service() {
                 val durationSeconds = workItem.recordingDuration ?: 60
                 putLong("callDurationMs", durationSeconds * 1000L)
             } else {
+                // Clear all work-related data when work is marked as not in progress
                 remove("workStartTime")
+                remove("isWorkInProgress")
             }
             apply()
         }
@@ -173,6 +192,7 @@ class CallWorkerService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterReceiver(workCompleteReceiver)
         serviceJob.cancel() // Cancel all coroutines started by this scope
         client.close()
         Log.d(TAG, "Service destroyed.")
