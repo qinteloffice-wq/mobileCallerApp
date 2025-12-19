@@ -2,20 +2,17 @@ package com.qintel.android.caller
 
 import android.Manifest
 import android.content.BroadcastReceiver
-import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.content.ContextCompat
-import io.ktor.client.* 
+import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
@@ -113,19 +110,6 @@ class CallStateReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun getUriFromPath(context: Context, filePath: String): Uri? {
-        val contentUri = MediaStore.Files.getContentUri("external")
-        val selection = "${MediaStore.Files.FileColumns.DATA} = ?"
-        val selectionArgs = arrayOf(filePath)
-        context.contentResolver.query(contentUri, arrayOf(MediaStore.Files.FileColumns._ID), selection, selectionArgs, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID))
-                return ContentUris.withAppendedId(contentUri, id)
-            }
-        }
-        return null
-    }
-
     private suspend fun uploadLatestRecording(context: Context) {
         val sharedPref = context.getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE)
         val fileName = sharedPref.getString("lastFileName", null)
@@ -175,23 +159,13 @@ class CallStateReceiver : BroadcastReceiver() {
                 )
 
                 if (response.status == HttpStatusCode.OK) {
-                    Log.d("UploadFile", "Successfully uploaded ${latestFile.name} for work item: $fileName on attempt $attempt.")
-                    val fileUri = getUriFromPath(context, latestFile.absolutePath)
-                    if (fileUri != null) {
-                        try {
-                            val deletedRows = context.contentResolver.delete(fileUri, null, null)
-                            if (deletedRows > 0) {
-                                Log.d("UploadFile", "Successfully deleted local recording via ContentResolver.")
-                            } else {
-                                Log.e("UploadFile", "Failed to delete via ContentResolver (0 rows affected). File might not exist.")
-                            }
-                        } catch (e: SecurityException) {
-                            Log.e("UploadFile", "SecurityException on deleting via ContentResolver.", e)
-                        }
-                    } else {
-                        Log.w("UploadFile", "Could not get content URI for file. Deletion failed.")
-                    }
-                    return // Exit after successful upload
+                    Log.d("UploadFile", "Successfully uploaded ${latestFile.name}. Now clearing the entire recording directory.")
+
+                    // --- ROBUST CLEANUP LOGIC ---
+                    clearRecordingDirectory(sourceDir)
+                    // --- END OF CLEANUP LOGIC ---
+
+                    return // Exit after successful upload and cleanup
                 } else {
                     Log.e("UploadFile", "Upload attempt $attempt failed with status: ${response.status.value}")
                 }
@@ -207,5 +181,33 @@ class CallStateReceiver : BroadcastReceiver() {
             }
         }
         Log.e("UploadFile", "Failed to upload file after $maxRetries attempts.")
+    }
+
+    private fun clearRecordingDirectory(directory: File) {
+        if (!directory.exists() || !directory.isDirectory) {
+            Log.w("Cleanup", "Cannot clear directory, as it does not exist or is not a directory: ${directory.absolutePath}")
+            return
+        }
+
+        val filesToDelete = directory.listFiles()
+        if (filesToDelete.isNullOrEmpty()) {
+            Log.d("Cleanup", "Recording directory is already empty.")
+            return
+        }
+
+        var successCount = 0
+        var failureCount = 0
+        for (file in filesToDelete) {
+            // Ensure we don't delete subdirectories, only files.
+            if (file.isFile) {
+                if (file.delete()) {
+                    successCount++
+                } else {
+                    failureCount++
+                    Log.e("Cleanup", "Failed to delete file: ${file.name}")
+                }
+            }
+        }
+        Log.d("Cleanup", "Cleanup complete. Deleted $successCount files, failed to delete $failureCount files.")
     }
 }
