@@ -18,6 +18,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.Spinner
 import android.widget.Toast
+import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -231,6 +232,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @RequiresPermission(allOf = [Manifest.permission.READ_PHONE_STATE, Manifest.permission.CALL_PHONE])
     private fun startCall(simIndex: Int) {
         phoneNumberEditText.clearFocus() // Fix for WindowLeaked crash
 
@@ -243,18 +245,17 @@ class MainActivity : AppCompatActivity() {
 
         val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-            val phoneAccountHandleList: List<PhoneAccountHandle> = telecomManager.callCapablePhoneAccounts
-            if (simIndex < phoneAccountHandleList.size) {
-                intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, phoneAccountHandleList[simIndex])
-            } else {
-                Toast.makeText(this, "SIM at index $simIndex not found.", Toast.LENGTH_LONG).show()
-                return
-            }
-        }
-
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+                val phoneAccountHandleList: List<PhoneAccountHandle> = telecomManager.callCapablePhoneAccounts
+                if (simIndex < phoneAccountHandleList.size) {
+                    intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, phoneAccountHandleList[simIndex])
+                } else {
+                    Toast.makeText(this, "SIM at index $simIndex not found.", Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
             startActivity(intent)
         } catch (e: SecurityException) {
             Toast.makeText(this, "Could not place call. Permission denied. Please grant permissions in Settings.", Toast.LENGTH_LONG).show()

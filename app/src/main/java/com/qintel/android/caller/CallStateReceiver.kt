@@ -142,7 +142,7 @@ class CallStateReceiver : BroadcastReceiver() {
             return
         }
         
-        val maxRetries = 10
+        val maxRetries = 3
         for (attempt in 1..maxRetries) {
             val client = HttpClient(CIO)
             try {
