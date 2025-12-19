@@ -90,8 +90,17 @@ class MainActivity : AppCompatActivity() {
 
         loadSimNumbers()
 
-        // Check if activity was launched by the service
-        if (intent.hasExtra("workItem")) {
+        handleWorkIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.d("MainActivity", "onNewIntent called.")
+        handleWorkIntent(intent)
+    }
+
+    private fun handleWorkIntent(intent: Intent?) {
+        if (intent?.hasExtra("workItem") == true) {
             val workItem = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.getSerializableExtra("workItem", WorkItem::class.java)
             } else {
@@ -100,7 +109,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (workItem != null) {
-                Log.d("MainActivity", "Launched by service with work: $workItem")
+                Log.d("MainActivity", "Handling work: $workItem")
                 val sharedPref = getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE)
                 val sim1 = sharedPref.getString("simNumber1", "") ?: ""
                 val simIndex = if (workItem.simCardName == sim1) 0 else 1
@@ -109,6 +118,7 @@ class MainActivity : AppCompatActivity() {
                 makeCall(simIndex)
             }
         } else {
+            // If not launched with a work item, start the polling service
             startCallWorkerService()
         }
     }
