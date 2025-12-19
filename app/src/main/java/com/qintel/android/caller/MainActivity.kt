@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private val PERMISSIONS_REQUEST_CODE = 1
+    private val TAG = "MainActivity"
 
     private lateinit var simSpinner: Spinner
     private lateinit var phoneNumberEditText: EditText
@@ -90,12 +91,23 @@ class MainActivity : AppCompatActivity() {
 
         loadSimNumbers()
 
-        handleWorkIntent(intent)
+        // --- THIS IS THE CRITICAL FIX ---
+        // Only process the intent if the Activity is being created for the first time.
+        // If savedInstanceState is not null, it's a recreation (e.g., rotation),
+        // and we should not re-process the work.
+        if (savedInstanceState == null) {
+            Log.d(TAG, "Activity created fresh. Processing intent.")
+            handleWorkIntent(intent)
+        } else {
+            Log.d(TAG, "Activity is being recreated. The call process is already running, so do nothing.")
+        }
+        // --- END OF FIX ---
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        Log.d("MainActivity", "onNewIntent called.")
+        Log.d(TAG, "onNewIntent called.")
+        setIntent(intent) // Update intent to handle recreation properly
         handleWorkIntent(intent)
     }
 
@@ -109,7 +121,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (workItem != null) {
-                Log.d("MainActivity", "Handling work: $workItem")
+                Log.d(TAG, "Handling work: $workItem")
                 val sharedPref = getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE)
                 val sim1 = sharedPref.getString("simNumber1", "") ?: ""
                 val simIndex = if (workItem.simCardName == sim1) 0 else 1
@@ -119,6 +131,7 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             // If not launched with a work item, start the polling service
+            Log.d(TAG, "Activity created without a specific work item.")
             startCallWorkerService()
         }
     }
