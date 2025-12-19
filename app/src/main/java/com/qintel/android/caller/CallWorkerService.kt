@@ -39,6 +39,12 @@ class CallWorkerService : Service() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
+    // Constants for dynamic polling
+    private val DEFAULT_POLL_INTERVAL_MS = 30_000L
+    private val FAST_POLL_INTERVAL_MS = 3_000L
+    private val FAST_POLL_TIMEOUT_MS = 5 * 60 * 1000L // 5 minutes
+    private var lastWorkTimeMillis = 0L
+
     companion object {
         const val ACTION_WORK_COMPLETE = "com.qintel.android.caller.ACTION_WORK_COMPLETE"
     }
@@ -121,7 +127,8 @@ class CallWorkerService : Service() {
                         }.body()
 
                         if (!workItem.callSequance.isNullOrBlank() && !workItem.fileName.isNullOrBlank()) {
-                            Log.d(TAG, "Received work: $workItem. Launching MainActivity.")
+                            Log.d(TAG, "Received work: $workItem. Launching MainActivity and switching to fast polling.")
+                            lastWorkTimeMillis = System.currentTimeMillis() // Update timestamp on new work
                             setWorkInProgress(true, workItem)
 
                             // Launch MainActivity to handle the call
@@ -140,7 +147,25 @@ class CallWorkerService : Service() {
                     Log.d(TAG, "Work is already in progress. Skipping poll.")
                     updateNotification("Work in progress...")
                 }
-                delay(5_000)
+
+                // Dynamic delay logic
+                val pollInterval: Long
+                if (lastWorkTimeMillis != 0L) { // If we have received work at least once
+                    val elapsedTimeSinceLastWork = System.currentTimeMillis() - lastWorkTimeMillis
+                    if (elapsedTimeSinceLastWork < FAST_POLL_TIMEOUT_MS) {
+                        pollInterval = FAST_POLL_INTERVAL_MS
+                        Log.d(TAG, "In fast poll window. Next poll in ${pollInterval / 1000} seconds.")
+                    } else {
+                        Log.d(TAG, "Fast poll timeout reached. Reverting to default polling interval.")
+                        lastWorkTimeMillis = 0L // Reset to default state
+                        pollInterval = DEFAULT_POLL_INTERVAL_MS
+                    }
+                } else {
+                    // Default state
+                    pollInterval = DEFAULT_POLL_INTERVAL_MS
+                    Log.d(TAG, "In default poll state. Next poll in ${pollInterval / 1000} seconds.")
+                }
+                delay(pollInterval)
             }
         }
     }
