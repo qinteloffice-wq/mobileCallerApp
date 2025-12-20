@@ -44,6 +44,7 @@ class CallWorkerService : Service() {
     private val FAST_POLL_INTERVAL_MS = 3_000L
     private val FAST_POLL_TIMEOUT_MS = 5 * 60 * 1000L // 5 minutes
     private var lastWorkTimeMillis = 0L
+    private var reverseSimOrder = false
 
     companion object {
         const val ACTION_WORK_COMPLETE = "com.qintel.android.caller.ACTION_WORK_COMPLETE"
@@ -114,8 +115,17 @@ class CallWorkerService : Service() {
                         val sim2 = sharedPref.getString("simNumber2", "") ?: ""
 
                         val simCards = mutableListOf<String>()
-                        if (sim1.isNotBlank()) simCards.add(sim1)
-                        if (sim2.isNotBlank()) simCards.add(sim2)
+                        if (reverseSimOrder) {
+                            if (sim2.isNotBlank()) simCards.add(sim2)
+                            if (sim1.isNotBlank()) simCards.add(sim1)
+                        } else {
+                            if (sim1.isNotBlank()) simCards.add(sim1)
+                            if (sim2.isNotBlank()) simCards.add(sim2)
+                        }
+                        // Only toggle the order if both SIMs are available to be swapped
+                        if (sim1.isNotBlank() && sim2.isNotBlank()) {
+                            reverseSimOrder = !reverseSimOrder
+                        }
 
                         val simData = SimData(simCards)
                         Log.d(TAG, "Checking for work with payload: $simData")
