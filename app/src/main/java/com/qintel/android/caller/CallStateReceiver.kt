@@ -128,42 +128,53 @@ class CallStateReceiver : BroadcastReceiver() {
 
         val sourceDir = possibleSourceDirs.find { it.exists() && it.isDirectory }
 
-        if (sourceDir == null) {
-            Log.e("UploadFile", "Could not find a valid call recording source directory.")
-            return
+        var latestFile: File? = null
+        if (sourceDir != null) {
+            // Add a small delay to ensure the file is fully written
+            delay(2000)
+            latestFile = sourceDir.listFiles()?.maxByOrNull { it.lastModified() }
         }
 
-        // Add a small delay to ensure the file is fully written
-        delay(2000)
-        val latestFile = sourceDir.listFiles()?.maxByOrNull { it.lastModified() }
+        val fileBytes: ByteArray
+        val uploadFileNameForHeader: String
 
         if (latestFile == null) {
-            Log.e("UploadFile", "No new recordings found in the directory.")
-            return
+            if (sourceDir == null) {
+                Log.e("UploadFile", "Could not find a valid call recording source directory. Uploading empty file.")
+            } else {
+                Log.w("UploadFile", "No new recordings found in the directory. Uploading an empty file.")
+            }
+            fileBytes = ByteArray(0)
+            uploadFileNameForHeader = "no-recording.mp3"
+        } else {
+            fileBytes = latestFile.readBytes()
+            uploadFileNameForHeader = latestFile.name
         }
         
         val maxRetries = 3
         for (attempt in 1..maxRetries) {
             val client = HttpClient(CIO)
             try {
-                Log.d("UploadFile", "Attempt $attempt of $maxRetries to upload ${latestFile.name}...")
+                Log.d("UploadFile", "Attempt $attempt of $maxRetries to upload $uploadFileNameForHeader...")
                 val response: HttpResponse = client.submitFormWithBinaryData(
                     url = "https://qintel-backend.onrender.com/api/post-recording",
                     formData = formData {
                         append("fileName", fileName)
-                        append("file", latestFile.readBytes(), Headers.build {
+                        append("file", fileBytes, Headers.build {
                             append(HttpHeaders.ContentType, "audio/mpeg")
-                            append(HttpHeaders.ContentDisposition, "filename=\"${latestFile.name}\"")
+                            append(HttpHeaders.ContentDisposition, "filename=\"$uploadFileNameForHeader\"")
                         })
                     }
                 )
 
                 if (response.status == HttpStatusCode.OK) {
-                    Log.d("UploadFile", "Successfully uploaded ${latestFile.name}. Now clearing the entire recording directory.")
+                    Log.d("UploadFile", "Successfully uploaded $uploadFileNameForHeader. Now clearing the entire recording directory.")
 
-                    // --- ROBUST CLEANUP LOGIC ---
-                    clearRecordingDirectory(sourceDir)
-                    // --- END OF CLEANUP LOGIC ---
+                    if(sourceDir != null) {
+                        // --- ROBUST CLEANUP LOGIC ---
+                        clearRecordingDirectory(sourceDir)
+                        // --- END OF CLEANUP LOGIC ---
+                    }
 
                     return // Exit after successful upload and cleanup
                 } else {
