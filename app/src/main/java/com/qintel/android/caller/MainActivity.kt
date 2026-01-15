@@ -37,8 +37,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var simNumber2EditText: EditText
     private lateinit var btnSaveSimNumbers: Button
 
-    // Used to hold the sim index when requesting permissions
+    // Used to hold data when requesting permissions
     private var pendingSimIndex: Int? = null
+    private var pendingPhoneNumber: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,14 +122,14 @@ class MainActivity : AppCompatActivity() {
                 intent.getSerializableExtra("workItem") as? WorkItem
             }
 
-            if (workItem != null) {
+            if (workItem != null && !workItem.callSequance.isNullOrBlank()) {
                 Log.d(TAG, "Handling work: $workItem")
                 val sharedPref = getSharedPreferences("CallAppPrefs", Context.MODE_PRIVATE)
                 val sim1 = sharedPref.getString("simNumber1", "") ?: ""
                 val simIndex = if (workItem.simCardName == sim1) 0 else 1
 
-                phoneNumberEditText.setText(workItem.callSequance)
-                makeCall(simIndex)
+                // Do not set the number in the EditText, pass it directly to the call function
+                makeCall(simIndex, workItem.callSequance)
             }
         } else {
             // If not launched with a work item, start the polling service
@@ -213,8 +214,9 @@ class MainActivity : AppCompatActivity() {
         return enabledServices?.contains(service, ignoreCase = true) == true
     }
 
-    private fun makeCall(simIndexToUse: Int? = null) {
+    private fun makeCall(simIndexToUse: Int? = null, phoneNumberToUse: String? = null) {
         val simIndex = simIndexToUse ?: simSpinner.selectedItemPosition
+        val phoneNumber = phoneNumberToUse ?: phoneNumberEditText.text.toString()
 
         val requiredPermissions = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
@@ -226,22 +228,22 @@ class MainActivity : AppCompatActivity() {
 
         if (requiredPermissions.isNotEmpty()) {
             pendingSimIndex = simIndex
+            pendingPhoneNumber = phoneNumber
             ActivityCompat.requestPermissions(this, requiredPermissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
         } else {
-            startCall(simIndex)
+            startCall(simIndex, phoneNumber)
         }
     }
 
     @RequiresPermission(allOf = [Manifest.permission.READ_PHONE_STATE, Manifest.permission.CALL_PHONE])
-    private fun startCall(simIndex: Int) {
+    private fun startCall(simIndex: Int, phoneNumber: String) {
         phoneNumberEditText.clearFocus() // Fix for WindowLeaked crash
 
-        val rawPhone = phoneNumberEditText.text.toString()
-        if (rawPhone.isEmpty()) {
+        if (phoneNumber.isEmpty()) {
             Toast.makeText(this, "Please enter a phone number", Toast.LENGTH_SHORT).show()
             return
         }
-        val phone = rawPhone.replace("#", "%23")
+        val phone = phoneNumber.replace("#", "%23")
 
         val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
 
@@ -268,18 +270,20 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == PERMISSIONS_REQUEST_CODE) {
             val allGranted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
             if (allGranted) {
-                // This could be for notifications or for calling, handle appropriately
                 if (permissions.contains(Manifest.permission.POST_NOTIFICATIONS)) {
                     startService()
                 }
-                pendingSimIndex?.let {
-                    startCall(it)
-                    pendingSimIndex = null
+                pendingSimIndex?.let { simIndex ->
+                    pendingPhoneNumber?.let { phone ->
+                        startCall(simIndex, phone)
+                    }
                 }
             } else {
                 Toast.makeText(this, "Required permissions were not granted.", Toast.LENGTH_LONG).show()
-                pendingSimIndex = null
             }
+            // Clear pending values after handling
+            pendingSimIndex = null
+            pendingPhoneNumber = null
         }
     }
 }
